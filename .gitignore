@@ -1,0 +1,12 @@
+# Generated at runtime: state files, logs, CSVs, videos, launch lock,
+# and route_recovery.txt. Never delete route_recovery.txt blindly.
+runtime/*
+!runtime/.gitkeep
+
+# Build outputs
+build/
+__pycache__/
+*.pyc
+
+# Local display helper
+.preview_xauthority
