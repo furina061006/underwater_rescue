@@ -1,8 +1,22 @@
-"""Image-plane curve fit. Curvature is pixels^-1, not physical radius."""
+"""下视导引线曲线拟合与左弧判定。
+
+曲率是图像平面内的像素曲率（px^-1），不是物理半径。
+
+@file down_curve.py
+@brief 对下视二值图做二次拟合，输出左弧标志、强度、横向偏移和预览点。
+"""
 import cv2
 import numpy as np
 
 def fit_curve(mask):
+ """@brief 拟合下视导引线并判断是否满足左弧条件。
+
+ @param mask 640×480 单通道下视二值图，非零像素为导引线。
+ @return 成功时返回字典，包含 left、strength、offset、curvature、headings、
+ delta、points、residual；无法稳定拟合时返回 None。
+ @note 左弧条件为 delta ≤ -12°、offset ≤ -0.03、curvature <0；strength 仅在
+ 左弧成立时非零。曲率单位为 px^-1，不是物理半径。
+ """
  h,w=mask.shape
  n,labels,stats,_=cv2.connectedComponentsWithStats(mask)
  ids=[i for i in range(1,n) if stats[i,cv2.CC_STAT_AREA]>=80 and stats[i,cv2.CC_STAT_HEIGHT]>=h*.3]

@@ -267,3 +267,12 @@ sha256sum -c SHA256SUMS.txt
 - 启动校验只要求 `SERVO10_MIN≤1200`、`SERVO10_MAX≥1800`，但转弯输出理论最低 **750 us**；首次验证需确认 `SERVO10_MIN` 不会对 750–1000 us 区间限幅。
 - 视觉程序依赖 OpenCV 窗口；无显示环境无法运行（会直接报错）。
 - 本整理版本未在硬件上启动验证，只完成静态结构、语法、纯逻辑测试与完整性清单更新。
+
+## 12. Agent 知识库
+
+新会话或自动化代理先读 [AGENTS.md](AGENTS.md)。它包含硬件安全红线、按任务路由到 [.dsh/agents/](.dsh/agents/) 主题文档、目录职责和知识维护约定。
+
+- 默认**不启动硬件**：预览、`--run`、控制器和 QGC/MAVProxy 都需要人类明确授权。
+- 未完成和待验证事项集中在 [backlog.md](backlog.md)。
+- 历史决策记录在 [.dsh/logs/README.md](.dsh/logs/README.md)。
+- 修改知识文档后运行 `python3 .dsh/tools/check_docs.py` 检查链接和结构。

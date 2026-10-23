@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""winner_fish 启动器：默认只预览；加 --run 启动限时 300 秒的视觉巡线控制器。"""
+"""winner_fish 启动器。
+
+默认只启动视觉预览；加 --run 后启动限时控制器。启动器负责单实例锁、
+运行时目录准备、视觉/控制器进程生命周期和最终日志打印。
+
+@file run_wide_search.py
+@brief 视觉预览与 CH10 控制器的统一启动入口。
+"""
 import argparse
 import os
 import signal
@@ -15,13 +22,23 @@ CONTROL = ROOT / 'bin' / 'wide_search_control'
 
 
 def child_env():
-    """Force both children onto the same runtime directory."""
+    """@brief 构造视觉/控制器子进程的环境变量。
+
+    @return 复制当前环境，并强制写入同一个 WIDE_SEARCH_RUNTIME。
+    @note 两个子进程必须看到相同的运行时目录，否则状态文件无法对接。
+    """
     env = os.environ.copy()
     env['WIDE_SEARCH_RUNTIME'] = str(RUNTIME)
     return env
 
 
 def main():
+    """@brief 启动器主流程：加锁、拉起视觉、等待状态、启动控制器并回收。
+
+    @return 退出码：0 正常，1 启动/运行错误，130 表示被 Ctrl+C 中断。
+    @exception RuntimeError 视觉进程提前退出，或 10 秒内没有新鲜前视状态。
+    @note 预览模式只等待视觉退出；--run 模式才会启动 bin/wide_search_control。
+    """
     parser = argparse.ArgumentParser(
         description='Preview the wide-search vision pipeline, or run it with CH10 control.')
     parser.add_argument('--run', action='store_true',
@@ -40,6 +57,11 @@ def main():
     os.chdir(ROOT)
 
     def stop(signum, frame):
+        """@brief 把 SIGTERM/SIGHUP 转换为 KeyboardInterrupt。
+
+        @param signum 收到的信号编号（忽略）。
+        @param frame 当前栈帧（忽略）。
+        """
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, stop)

@@ -1,4 +1,11 @@
-"""50%-100% height horizontal fit + original binary-bottom following. Q exits."""
+"""前视巡线 + 下视曲线/断口的视觉主循环。
+
+前视 ROI 为画面右侧 80%，提取底部导引线位置并发布给控制器；下视线程持续
+读取最新帧，主循环拟合曲线、检测断口并发布状态。窗口显示四画面，按 Q/Esc 退出。
+
+@file wide_search_vision.py
+@brief 相机采集、视觉检测、状态发布、四画面预览与录像。
+"""
 import cv2
 import numpy as np
 import time
@@ -21,11 +28,25 @@ DOWN_CAMERA = os.environ.get(
     '/dev/v4l/by-id/usb-HD_Camera_Manufacturer_USB_2.0_Camera-video-index0')
 
 def publish(stamp, x, horizontal, present=False):
+    """@brief 原子发布前视状态。
+
+    @param stamp 采集前的前视帧单调时间戳，单位秒。
+    @param x ROI 内底线横向比例；-1 表示没有检测到底线。
+    @param horizontal 是否拟合出上视线（仅预览使用）。
+    @param present 是否检测到任意长线（上视线或 any_line）。
+    @note 先写 wide_search_state.tmp，再 rename 为正式文件，避免读到半行。
+    """
     tmp = RUNTIME / 'wide_search_state.tmp'
     tmp.write_text('%.9f %.6f %d %d\n' % (stamp, x, horizontal, present))
     tmp.replace(RUNTIME / 'wide_search_state.txt')
 
 def bottom(mask):
+    """@brief 找最大连通域的底部中心。
+
+    @param mask 单通道二值掩码，非零像素为候选导引线。
+    @return (底部 5 行像素 x 的中位数, 最大 y)，没有面积 ≥40 的连通域时返回 None。
+    @note 控制器使用的 x 是这里返回的 x 除以 ROI 宽度。
+    """
     n, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
     ids = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= 40]
     if not ids:
@@ -36,6 +57,13 @@ def bottom(mask):
     return float(np.median(xs[ys >= y - 5])), y
 
 def upper_line(mask):
+    """@brief 在下半画面拟合最像导引线的长条轮廓。
+
+    @param mask 单通道二值掩码。
+    @return (水平跨度, 轮廓, (vx,vy,x,y), 角度) 或 None；轮廓 y 已恢复为整图坐标。
+    @note 要求 |角度| ≤70°、跨度 ≥30% 画宽、长短边比 ≥3；结果只用于预览，
+    不参与控制器判定。
+    """
     y0, y1 = mask.shape[0] // 2, mask.shape[0]
     upper = mask[y0:y1]
     # A long, thin, moderately angled contour in the lower half is the guide line.
@@ -57,6 +85,11 @@ def upper_line(mask):
     return max(candidates, key=lambda c: c[0]) if candidates else None
 
 def any_line(mask):
+    """@brief 判断画面中是否存在任意长条。
+
+    @param mask 单通道二值掩码。
+    @return true 表示存在面积 ≥40、长边 ≥20% 画高且长短边比 ≥3 的轮廓。
+    """
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     for c in contours:
         if cv2.contourArea(c)<40:continue
@@ -66,10 +99,22 @@ def any_line(mask):
     return False
 
 class DownCamera:
+    """@brief 在后台守护线程中持续读取下视相机。"""
+
     def __init__(self):
+        """@brief 启动下视读取线程并初始化最新帧状态。
+
+        @note frame/stamp/packet 由读取线程更新；stop 由主线程置位。
+        """
         self.frame=None;self.stamp=0;self.stop=False;self.packet=(None,0)
         self.thread=threading.Thread(target=self.read,daemon=True);self.thread.start()
+
     def read(self):
+        """@brief 打开下视相机并循环保存最新帧和时间戳。
+
+        @note 相机打不开或读取失败时线程退出；主循环随后看到旧时间戳，
+        会发布 stamp=0 的下视状态。该函数在守护线程中运行。
+        """
         c=cv2.VideoCapture(DOWN_CAMERA,cv2.CAP_V4L2)
         try:
             c.set(cv2.CAP_PROP_FOURCC,cv2.VideoWriter_fourcc(*'MJPG'))
@@ -81,6 +126,12 @@ class DownCamera:
         finally:c.release()
 
 def tile(im,label):
+    """@brief 将图像缩放并居中到 320×240 的四画面格子中。
+
+    @param im 任意尺寸的 BGR 图像。
+    @param label 绘制在格子左上角的标签。
+    @return 320×240×3 的 BGR 画布。
+    """
     canvas=np.zeros((240,320,3),np.uint8)
     h,w=im.shape[:2];scale=min(320/w,240/h)
     rw,rh=round(w*scale),round(h*scale);x=(320-rw)//2;y=(240-rh)//2
@@ -90,7 +141,17 @@ def tile(im,label):
     return canvas
 
 def main():
+    """@brief 视觉进程主循环：相机、检测、发布、预览和录像。
+
+    @exception RuntimeError 前视相机无法打开或读取失败。
+    @note 退出时统一发布 stamp=0 的前视状态、关闭录像/下视线程并释放相机。
+    """
     def stop(signum, frame):
+        """@brief 把 SIGTERM/SIGHUP 转换为 KeyboardInterrupt。
+
+        @param signum 收到的信号编号（忽略）。
+        @param frame 当前栈帧（忽略）。
+        """
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGHUP, stop)

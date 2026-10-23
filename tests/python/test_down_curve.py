@@ -1,3 +1,8 @@
+"""下视曲线拟合与前视上视线拟合的算法测试。
+
+@file test_down_curve.py
+@brief 构造左弧/右弧/直线/空白掩码，验证 fit_curve 与 upper_line 的判定。
+"""
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'src'/'vision'))

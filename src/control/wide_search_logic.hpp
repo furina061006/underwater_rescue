@@ -2,10 +2,36 @@
 #include <cmath>
 #include <stdexcept>
 #include <algorithm>
+
+/**
+ * @file wide_search_logic.hpp
+ * @brief 前视三段巡线与下视左弧固定 2 s 转弯的纯逻辑状态机。
+ */
+
+/**
+ * @brief 根据前视底线位置和下视左弧状态计算 CH10 目标 PWM。
+ *
+ * stage=1 时执行前视巡线；下视左弧连续 0.1 s 后进入 stage=2，
+ * 固定转弯 2 s，再回到 stage=1。转弯结束后必须先看到非左弧样本才会重新武装。
+ */
 struct HorizontalLossRoute {
  int stage=1;unsigned turns=0;double candidate=-1,last_down=-1,center=900,last_now=-1,turn_until=-1,turn_start=0;bool ready=true;
- // horizontal/any are reserved for future vision cues; routing uses x plus the down-camera arc.
- int step(double now,double t,double stamp,double x,bool /*horizontal*/,bool /*any*/,double down_stamp,bool left,double strength){
+ /**
+  * @brief 推进一步巡线/转弯状态机并返回本周期 PWM。
+  * @param now 当前单调时钟，单位秒。
+  * @param t 本次任务已运行的秒数，用于巡线正弦相位。
+  * @param stamp 前视状态时间戳，单位秒。
+  * @param x 前视底线横向比例，范围 [-1,1]；-1 表示没有底线。
+  * @param horizontal 保留参数：前视上视线是否拟合成功（当前不参与控制）。
+  * @param any 保留参数：是否检测到任意长线（当前不参与控制）。
+  * @param down_stamp 下视状态时间戳，单位秒；0 或过期表示无效。
+  * @param left 下视是否判定为持续左弧。
+  * @param strength 左弧强度，范围 [0,1]。
+  * @return CH10 目标 PWM，单位 us；无底线且不在转弯时返回 0。
+  * @exception std::runtime_error 前视状态过期/非法，或转弯中下视状态过期。
+  */
+ int step(double now,double t,double stamp,double x,bool horizontal,bool any,double down_stamp,bool left,double strength){
+  (void)horizontal; (void)any; // 保留参数，仅用于未来视觉线索。
   if(!std::isfinite(stamp)||!std::isfinite(x)||stamp>now||now-stamp>.5||x < -1||x>1)throw std::runtime_error("Front vision stale/invalid");
   bool fresh=std::isfinite(down_stamp)&&down_stamp>0&&down_stamp<=now&&now-down_stamp<=.5&&std::isfinite(strength)&&strength>=0&&strength<=1;
   if(!fresh){candidate=-1;if(stage==2)throw std::runtime_error("Down camera stale during turn");}

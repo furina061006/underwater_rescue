@@ -1,12 +1,33 @@
-# Generated at runtime: state files, logs, CSVs, videos, launch lock,
-# and route_recovery.txt. Never delete route_recovery.txt blindly.
+# 谁拥有这些文件、它们是否应该进入历史。
+# 运行数据是现场证据，构建产物可重建，机器配置不属于项目。
+
+# --- 本机/代理的本地覆盖层（不要提交到共享历史） ---
+AGENTS.local.md
+CLAUDE.local.md
+
+# --- 运行数据：状态、日志、CSV、录像、锁和恢复记录 ---
+# route_recovery.txt 是安全证据，绝不能当成临时文件删除或提交。
 runtime/*
 !runtime/.gitkeep
 
-# Build outputs
+# --- 构建产物：可由 Makefile 重建 ---
 build/
 __pycache__/
 *.pyc
+.pytest_cache/
 
-# Local display helper
+# --- 大型媒体和现场记录（runtime/ 之外也不要误提交） ---
+*.avi
+*.mp4
+*.log
+*.csv
+
+# --- 本机显示/编辑器/OS 配置 ---
 .preview_xauthority
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# --- 预编译控制器有意保留，不忽略 ---
+# bin/wide_search_control 是备份时的 ARM64 二进制，需要随仓库保存。

@@ -1,8 +1,21 @@
-"""Pair aligned strips; allow clipped edge fragments against a long strip."""
+"""下视导引线断口检测与事件去抖。
+
+通过配对方向一致、横向对齐的两段条带定位断口，允许画面边缘被裁掉的短片段。
+
+@file gap_light.py
+@brief 断口几何检测与 0.1 s/0.5 s 事件去抖。
+"""
 import cv2
 import numpy as np
 
 def detect_gap(mask):
+    """@brief 在二值图中检测一个符合尺寸约束的导引线断口。
+
+    @param mask 640×480 单通道下视二值图，非零像素为导引线。
+    @return (起点, 终点) 两个整数像素坐标；没有合法断口时返回 None。
+    @note 断口长度必须在 8 px 到画面高度 45% 之间，且断口采样点中至少 80%
+    为背景；允许触边短片段与长条带配对。
+    """
     h,w=mask.shape
     contours,_=cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
     parts=[]
@@ -40,8 +53,25 @@ def detect_gap(mask):
     return None
 
 class GapEvent:
-    def __init__(self): self.since=None;self.clear=None;self.ready=True;self.event=0;self.last=0
+    """@brief 把逐帧断口检测转换为单调递增的事件计数。"""
+
+    def __init__(self):
+        """@brief 初始化断口确认/清除计时状态。
+
+        @note since 记录本次连续检测的起点，clear 记录连续未检测的起点；
+        ready=False 表示事件已触发、等待断口消失 0.5 s 后重新武装。
+        """
+        self.since=None;self.clear=None;self.ready=True;self.event=0;self.last=0
+
     def step(self,stamp,detected):
+        """@brief 推进一步断口事件状态机。
+
+        @param stamp 下视状态时间戳，单位秒；必须单调递增。
+        @param detected 当前帧是否检测到断口。
+        @return 最新事件计数；计数增加表示产生一次新的亮灯事件。
+        @note 连续检测 0.1 s 才触发；连续未检测 0.5 s 才允许下一次触发。
+        stamp 不大于上次值时直接返回当前计数。
+        """
         if stamp<=self.last:return self.event
         self.last=stamp
         if detected:
