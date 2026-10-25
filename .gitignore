@@ -6,7 +6,7 @@ AGENTS.local.md
 CLAUDE.local.md
 
 # --- 运行数据：状态、日志、CSV、录像、锁和恢复记录 ---
-# route_recovery.txt 是安全证据，绝不能当成临时文件删除或提交。
+# rescue_recovery.txt 是安全证据，绝不能当成临时文件删除或提交；旧 route_recovery.txt 也按安全证据处理。
 runtime/*
 !runtime/.gitkeep
 
@@ -29,5 +29,5 @@ __pycache__/
 *.swp
 .DS_Store
 
-# --- 预编译控制器有意保留，不忽略 ---
-# bin/wide_search_control 是备份时的 ARM64 二进制，需要随仓库保存。
+# --- 控制器由目标机构建 ---
+# 仓库不保证自带 ARM64 二进制；bin/rescue_control 由 make control 生成。

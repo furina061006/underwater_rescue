@@ -1,16 +1,16 @@
 # 硬件接口与参数
 
-本文只描述**软件实际使用的接口**。整机供电、接线、防水和推进器安全按整机 SOP 执行；
+本文只描述救援软件实际使用的接口。整机供电、接线、防水和推进器安全按整机 SOP 执行；
 这里不替代电气原理图。
 
 ## 1. 系统连接
 
-```text
-                 USB                          USB
-┌────────────┐  H264   ┌──────────────┐      ┌──────────────┐
-│ 前视相机   ├────────►│              │      │ 下视相机     │
-└────────────┘         │   Jetson     │◄─────┤ USB2.0/MJPG  │
-                       │   ARM64      │      └──────────────┘
+~~~text
+                 USB
+┌────────────┐  H264   ┌──────────────┐
+│ 前视相机   ├────────►│              │
+└────────────┘         │   Jetson     │
+                       │   ARM64      │
                        │              │
                        │ 视觉 + 控制器│
                        └──────┬───────┘
@@ -19,52 +19,49 @@
                        ┌──────────────┐
                        │ Pixhawk6X    │
                        │ ArduSub      │
-                       └──┬────┬───┬──┘
-                          │    │   │
-                    CH10  │    │   │ CH12
-                  鱼尾舵机│    │   │ 继电器 → 指示灯
-                          │    │   │
-                     CH11 云台（人工 1800，程序不碰）
-```
+                       └──────┬───────┘
+                              │
+                         CH10 鱼尾
+~~~
+
+CH11 云台由人工设置；CH12 灯在本项目不使用。
 
 ## 2. 设备节点
 
 | 设备 | 默认路径 | 打开参数 | 环境变量覆盖 |
 | --- | --- | --- | --- |
-| 前视相机 | `/dev/v4l/by-id/usb-H264_USB_Camera_H264_USB_Camera_2020032801-video-index0` | V4L2，640×480，缓冲 1 | `WIDE_SEARCH_FRONT_CAMERA` |
-| 下视相机 | `/dev/v4l/by-id/usb-HD_Camera_Manufacturer_USB_2.0_Camera-video-index0` | V4L2，MJPG，640×480，缓冲 1 | `WIDE_SEARCH_DOWN_CAMERA` |
-| 飞控 | `/dev/serial/by-id/usb-ArduPilot_Pixhawk6X-bdshot_20001F001551333234343538-if00` | 115200 8N1 raw，独占 | 控制器 `--port`（启动器当前不透传） |
+| 前视相机 | /dev/v4l/by-id/usb-H264_USB_Camera_H264_USB_Camera_2020032801-video-index0 | V4L2，640×480，缓冲 1 | RESCUE_FRONT_CAMERA（兼容 WIDE_SEARCH_FRONT_CAMERA） |
+| 飞控 | /dev/serial/by-id/usb-ArduPilot_Pixhawk6X-bdshot_20001F001551333234343538-if00 | 115200 8N1 raw，独占 | 控制器 --port |
 
 检查设备：
 
-```bash
+~~~bash
 ls -l /dev/v4l/by-id/
 ls -l /dev/serial/by-id/
 v4l2-ctl --list-devices 2>/dev/null || true
-```
+~~~
 
-如果 `by-id` 名称变化，用环境变量指向新的 `/dev/videoN`，或修改源码中的默认值。
+如果 by-id 名称变化，用环境变量指向新的 /dev/videoN，或修改源码默认值。
 不要让两个视觉进程同时打开同一台相机。
 
 ## 3. 飞控串口
 
-`Link` 的配置：
+Link 的配置：
 
-- `open(path, O_RDWR | O_NOCTTY | O_NONBLOCK)`；
-- `flock(fd, LOCK_EX | LOCK_NB)`：防止两个控制器同时写；
-- `ioctl(fd, TIOCEXCL)`：禁止其他进程打开同一 tty；
-- 保存原 `termios`，退出时恢复；
-- `cfmakeraw`，115200 输入/输出；
-- `CLOCAL | CREAD`，关闭 `CRTSCTS`、`HUPCL`；
-- `tcsetattr(fd, TCSANOW, ...)`。
+- open(path, O_RDWR | O_NOCTTY | O_NONBLOCK)；
+- flock(fd, LOCK_EX | LOCK_NB)：防止两个控制器同时写；
+- ioctl(fd, TIOCEXCL)：禁止其他进程打开同一 tty；
+- 保存原 termios，退出时恢复；
+- cfmakeraw，115200 输入/输出；
+- CLOCAL | CREAD，关闭 CRTSCTS、HUPCL。
 
 MAVLink：
 
-- 使用 `mavlink/v2.0/ardupilotmega/mavlink.h`；
-- 只接受 `compid=1` 且 `autopilot=MAV_AUTOPILOT_ARDUPILOTMEGA`、`type=MAV_TYPE_SUBMARINE` 的心跳对应飞控；
-- 控制器自身 system/component 为 `245/190`；
+- 使用 mavlink/v2.0/ardupilotmega/mavlink.h；
+- 只接受 compid=1、autopilot=MAV_AUTOPILOT_ARDUPILOTMEGA、type=MAV_TYPE_SUBMARINE 的心跳 ;
+- 控制器自身 system/component 为 245/190；
 - 只解析目标 system 的消息，忽略其他系统；
-- 不发送解锁、模式、RC override。
+- 不发送解锁、模式、RC override、继电器命令。
 
 ## 4. ArduSub 参数
 
@@ -72,20 +69,17 @@ MAVLink：
 
 | 参数 | 要求 | 用途 | 不满足 |
 | --- | --- | --- | --- |
-| `SERVO10_FUNCTION` | 0，或 7 且 `MNT1_TYPE=0` | CH10 作为鱼尾输出；7 为原云台功能，程序临时改为 0 | `CH10 not idle` |
-| `SERVO10_MIN` | ≤ 1200 | 允许前视 1300–1700 输出 | `Configured range excludes test` |
-| `SERVO10_MAX` | ≥ 1800 | 同上 | 同上 |
-| `SERVO_RATE` | = 50 | 已验证的 50 Hz PWM 计划 | `Expected 50 Hz for this verified schedule` |
-| `MNT1_TYPE` | 当 `SERVO10_FUNCTION=7` 时必须为 0 | 避免与云台功能冲突 | `CH10 not idle` |
-| `SERVO12_FUNCTION` | = -1 | CH12 作为 GPIO，不作为舵机 | `CH12 lamp configuration mismatch` |
-| `RELAY1_FUNCTION` | = 1 | 启用继电器实例 1 | 同上 |
-| `RELAY1_PIN` | = 53 | 继电器映射到 CH12 对应引脚 | 同上 |
-| `RELAY1_DEFAULT` | = 0 | 上电默认关灯 | 同上 |
+| SERVO10_FUNCTION | 0，或 7 且 MNT1_TYPE=0 | CH10 作为鱼尾输出；7 为原云台功能，程序临时改为 0 | CH10 not idle |
+| SERVO10_MIN | ≤ 调参文件 pwm_min（默认 1200） | 允许轻撞/转向输出 | SERVO10 range excludes configured rescue PWM |
+| SERVO10_MAX | ≥ 调参文件 pwm_max（默认 1800） | 同上 | 同上 |
+| SERVO_RATE | = 50 | 已验证的 50 Hz PWM 计划 | Expected SERVO_RATE=50 |
+| MNT1_TYPE | 当 SERVO10_FUNCTION=7 时必须为 0 | 避免与云台功能冲突 | CH10 not idle |
+| SERVO12_FUNCTION | 不读取 | CH12 不使用 | — |
+| RELAY1_* | 不读取 | CH12 不使用 | — |
 
-> **重要边界**：源码只校验 `SERVO10_MIN≤1200`、`SERVO10_MAX≥1800`。固定左弧转弯的
-> 输出是 `center 850..900 ±100`，理论最低为 **750 us**；如果实际 `SERVO10_MIN` 高于
-> 750 us，飞控可能对转弯输出限幅。请在台架/水池首次验证时确认 750–1000 us 能完整输出；
-> 本整理未改这段校验逻辑。
+> 默认轻撞是 ±100 us（1400–1600），但调参文件默认 pwm_min=1200、pwm_max=1800，
+> 以便现场升到 ±300。若飞控实际范围更窄，需要把 rescue_tuning.txt 的 pwm_min/pwm_max
+> 改成实际可用范围，并在首次验证时确认不被限幅。
 
 ## 5. CH10 鱼尾
 
@@ -94,104 +88,64 @@ MAVLink：
 | 状态 | PWM |
 | --- | --- |
 | 未运行/收尾 | 0 |
-| 前视左段 | 1300–1400 + 100·sin(2π·5t) |
-| 前视中段 | 1500 + 100·sin(2π·4t) |
-| 前视右段 | 1600–1700 + 100·sin(2π·5t) |
-| 固定左弧转弯 | 850–900 + 100·sin(2π·5(now-turn_start)) |
+| SEARCH | 1500 + 扫描正弦 + 巡航正弦，默认 1250–1750 |
+| ALIGN | 1500 + steer_gain·err + 巡航正弦，钳位到 pwm_min/pwm_max |
+| RAM | 1500 ± ram_amp，默认 ±100 us、5 Hz、0.6 s |
+| RECOVER/VERIFY | 0 |
+| AVOID | 1500 + avoid_bias + 巡航正弦，钳位 |
 
-- 0 表示停止/无输出，是本项目已验证的怠速值；
-- 前视输出范围 1300–1700，叠加 ±100 后理论 1200–1800，正好对应参数校验边界；
-- 转弯输出理论 750–1000；
-- 所有值四舍五入为整数微秒，由 `DO_SET_SERVO` 的 `param2` 下发；
-- 频率由飞控 `SERVO_RATE=50` 决定，控制器以 50 Hz 更新目标值。
+- 0 表示停止/无输出，是本项目沿用原项目的怠速值；
+- 默认轻撞档与已验证巡线幅度一致；±300 只作为可调上限；
+- 所有值四舍五入为整数微秒，由 DO_SET_SERVO 的 param2 下发；
+- 频率由飞控 SERVO_RATE=50 决定，控制器以 50 Hz 更新目标值。
 
-### 5.2 前视控制律
+### 5.2 轻撞档
 
-设 `x` 为 ROI 内底线中心比例：
+- 默认 ram_amp=100、ram_freq=5 Hz、ram_burst=0.6 s；
+- 现场可先用 ±50/±100 试撞，再按需要升到 ±200/±300；
+- 撞后 RECOVER 0.6 s、VERIFY 0.5 s；
+- 未命中重试 retry_max=3 次，仍不成立则 AVOID 1.5 s 离开；
+- 输出始终钳位到 pwm_min/pwm_max，默认 1200–1800。
 
-```text
-x < 0            -> 0
-0 ≤ x < 0.45     -> 1300 + 100·x/0.45 + 100·sin(2π·5t)
-0.45 ≤ x ≤ 0.55  -> 1500 + 100·sin(2π·4t)
-x > 0.55         -> 1600 + 100·(x-0.55)/0.45 + 100·sin(2π·5t)
-```
+## 6. CH11 云台与 CH12 灯
 
-`t` 是本次任务已运行秒数。中段使用 4 Hz，左右段使用 5 Hz；这是冻结备份的原始设计。
+- CH11：程序不读、不写、不输出；起飞前由人工设置。
+- CH12：本项目不使用；控制器不读 CH12/RELAY 参数、不发 DO_SET_RELAY。
+- 如果现场灯还亮着，由人工关闭，不要指望控制器收尾时关灯。
 
-### 5.3 下视左弧转弯
+## 7. 场地与支柱几何
 
-- 触发条件：远端-近端航向变化 ≤ -12°、左偏 ≤ -3% 画宽、曲率 <0，连续 0.1 s；
-- 转弯固定 2 s，5 Hz；
-- 中心从 900 向 `900-50·strength`（850–900）以最大 600 us/s 移动；
-- 同一段持续左弧不会重复触发；需要先看到非左弧样本重新武装；
-- 转弯期间下视失联即中止，不做盲转。
-
-## 6. CH11 云台
-
-- 程序不读取、不写入 CH11；
-- 起飞前由人工设置为 **1800**；
-- 控制器启动时只检查 `SERVO10_FUNCTION` 与 `MNT1_TYPE` 是否允许安全接管 CH10；
-- 不要在运行中手动改云台，以免与冻结的视线标定不一致。
-
-## 7. CH12 灯 / 继电器
-
-| 项目 | 值 |
-| --- | --- |
-| 通道 | CH12 |
-| 舵机功能 | `SERVO12_FUNCTION=-1`（GPIO） |
-| 继电器实例 | `RELAY1_FUNCTION=1` |
-| 引脚 | `RELAY1_PIN=53` |
-| 上电默认 | `RELAY1_DEFAULT=0` |
-| 控制消息 | `COMMAND_LONG(MAV_CMD_DO_SET_RELAY, param1=0, param2=0/1)` |
-| 亮灯时长 | 0.5 s |
-| ACK 超时 | 0.3 s（运行中）/ 1 s（初始与收尾） |
-
-行为：
-
-- 启动预检时先发 0，确保灯灭；
-- 视觉断带事件 `event` 增加时发 1，0.5 s 后发 0；
-- 下视状态不新鲜时主动发 0；
-- 灯命令同一时刻最多一条在途；
-- 收尾再发一次 0，并等待 `LAMP_OFF_CONFIRMED`。
+- 水池有效区 3 m × 2 m × 0.6 m，水深 0.2 m；
+- 机器鱼从右侧池壁中心出发；
+- 黑色笔筒：直径 80+5 mm，高度 190+10 mm；顶部透明水杯约 84 mm × 84 mm；
+- 1/3/4 为双笔筒叠制（较高）；2 为 0.25 kg 配重；5 为 0.5 kg 配重；
+- 按现场修正：5 号在中间、4 号在右中、2 号在左中，1/3 在左侧上下；
+- 从右侧中心出发，中线顺序是 4→5→2；首版按最近/投影最大选择，不硬编码编号。
 
 ## 8. 视觉坐标与阈值
 
-### 8.1 前视
-
-- 原始画面 640×480；
-- ROI：横向从 20% 到 100%，即 x=128..639；
-- `x` 为 ROI 内比例，不是全画面比例；
-- 阈值：HSV `S ≤ 60`、`V ≥ 220`（滑条可调，不持久化）；
-- 底线：最大连通域面积 ≥ 40，取最底部 5 行中位数；
-- 上视线：ROI 下半部，角度 ±70°、跨度 ≥30% ROI 宽、长宽比 ≥3，仅显示。
-
-### 8.2 下视
-
-- 640×480；
-- 阈值：HSV `S ≤ 60`、`V ≥ 175`（滑条可调，不持久化）；
-- 曲线：最大连通域面积 ≥80、高度 ≥30% 画面；每 3 行采样；二次拟合；
-- 航向角：近/中/远三段；`delta=far-near`；
-- 横向偏移：`offset=(x(1)-x(0))/width`，左偏为负；
-- 曲率：图像平面有符号曲率，单位 `px⁻¹`；
-- 左弧：`delta≤-12°`、`offset≤-0.03`、`curvature<0`；
-- 断口：8 px–45% 画面高度，两侧条带方向差 ≤15°，80% 采样点为背景。
+- 原始画面 640×480；使用全画面，不裁 ROI。
+- 黑色掩码：HSV V≤Vmax（默认 100）、S≤Smax（默认 120）。
+- 闭运算默认 9×9 椭圆核；3×3 开运算。
+- W=minAreaRect 短边，H=长边；R=H/W；width_frac=W/画宽；x=中心/画宽。
+- 过滤：面积≥300、W∈[12,500] px、R∈[1.6,6.0]、fill≥45%、|tilt|≤25°。
+- 跟踪：3 帧确认；丢失保持 0.3 s；EMA α=0.5。
+- GUI 滑条可改以上阈值；阈值不持久化到源码，只写 runtime/rescue_tuning.txt。
 
 ## 9. 安全联锁
 
 | 联锁 | 检查点 | 动作 |
 | --- | --- | --- |
-| 未解锁 | 每 20 ms | 已解锁 → 中止并收尾 |
-| 心跳 | 每 20 ms | >2.5 s → 中止并收尾 |
-| 串口独占 | 启动 | 加锁失败 → 拒绝启动 |
-| CH12 配置 | 启动预检 | 不符 → 中止，不接管 CH10 |
-| CH10 范围/频率/输出 | 启动预检 | 不符 → 中止，不接管 CH10 |
-| 恢复记录 | 启动预检 | 已存在 → 中止，不接管 CH10 |
-| 前视新鲜 | 每周期 | >0.5 s → 中止 |
-| 下视新鲜 | 每周期 | 转弯中 >0.5 s → 中止；否则取消候选 |
-| ACK | 每周期 | 拒绝/0.3 s 停滞 → 中止 |
-| 调度 | 每周期 | >60 ms → 中止 |
-| 时长 | 循环 | ≥300 s → 正常收尾 |
-| 收尾 | 退出 | 尝试关灯；CH10=0 且功能恢复才删恢复记录（关灯失败仅 rc=1） |
+| 未解锁 | 每 20 ms | 已解锁 -> 中止并收尾 |
+| 心跳 | 每 20 ms | >2.5 s -> 中止并收尾 |
+| 串口独占 | 启动 | 加锁失败 -> 拒绝启动 |
+| CH10 范围/频率/输出 | 启动预检 | 不符 -> 中止，不接管 CH10 |
+| 恢复记录 | 启动预检 | rescue_recovery.txt 或旧 route_recovery.txt 存在 -> 中止 |
+| 前视新鲜 | 每周期 | >0.5 s -> 中止 |
+| ACK | 每周期 | 拒绝/0.3 s 停滞 -> 中止 |
+| 调度 | 每周期 | >60 ms -> 中止 |
+| 时长 | 循环 | ≥300 s -> 正常收尾 |
+| 收尾 | 退出 | CH10=0 且功能恢复才删恢复记录 |
 
 ## 10. 上电/断电顺序建议
 
@@ -199,18 +153,18 @@ x > 0.55         -> 1600 + 100·(x-0.55)/0.45 + 100·sin(2π·5t)
 
 1. 按整机 SOP 上电；
 2. 确认飞控启动完成、未解锁、参数正确；
-3. 确认两台相机和飞控 `by-id` 节点出现；
-4. 确认云台已人工设为 1800、灯灭、鱼尾无动作；
-5. 确认 `runtime/route_recovery.txt` 不存在；
+3. 确认前视相机和飞控 by-id 节点出现；
+4. 确认云台位置、鱼尾无动作、灯状态安全；
+5. 确认 runtime/rescue_recovery.txt 和旧 route_recovery.txt 都不存在；
 6. 启动预览，确认画面和检测正常；
-7. 再执行 `--run`。
+7. 再执行 --run。
 
 程序退出后：
 
-1. 确认日志中 `STOP=1`、`confirmed=1`、`LAMP_OFF_CONFIRMED`；
-2. 确认没有残留 `wide_search_control` / `wide_search_vision`；
-3. 确认 `route_recovery.txt` 不存在；
-4. 目视确认灯灭、鱼尾中位；
+1. 确认日志中 STOP=1、confirmed=1；
+2. 确认没有残留 rescue_control / rescue_vision；
+3. 确认 rescue_recovery.txt 不存在；
+4. 目视确认鱼尾中位；
 5. 按整机 SOP 断电。
 
 ## 11. 明确不在软件范围内的内容

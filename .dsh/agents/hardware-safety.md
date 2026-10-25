@@ -1,6 +1,6 @@
 > 返回 [AGENTS.md](../../AGENTS.md) ｜ 状态：【事实】+【设计】+【待验证】
 > 本文件是 agent 摘要；硬件数值和完整流程的权威定义在 [docs/](../../docs/)，冲突时以 docs/源码为准。
-> 相关：[硬件接口](../../docs/HARDWARE_IO.md)、[运行顺序](../../docs/RUNTIME_SEQUENCE.md)、[操作手册](../../docs/OPERATIONS.md)、[backlog](../../backlog.md)
+> 相关：[架构](architecture.md)、[视觉](vision.md)、[控制](control.md)、[操作](operations.md)
 
 # 硬件安全与“不启动硬件”规则
 
@@ -8,57 +8,55 @@
 
 【设计】默认授权级别是 **只读代码/文档 + 静态编辑**。任何会打开相机、串口、GUI 或操作执行机构的动作，都需要人类在当次会话中明确确认。
 
-【事实】目标机是 Jetson ARM64 + ArduSub/Pixhawk6X；CH10 是鱼尾舵机，CH12 是断带灯继电器，CH11 云台由人工设置。
+【事实】目标机是 Jetson ARM64 + ArduSub/Pixhawk6X；CH10 是鱼尾舵机，CH11 云台人工设置，CH12 灯在本项目不使用。
 
-【事实】本仓库是 2025-10-22 冻结备份的结构化副本，控制算法、阈值和时序保持原样；整理过程未启动硬件。
+【事实】本仓库由旧巡线参考项目改造；旧 wide_search 实现已删除，控制器只做救援轻撞。
 
 ## 2. 禁止动作清单
 
 | 动作 | 为什么默认禁止 | 默认 |
 | --- | --- | --- |
-| `python3 run_wide_search.py` | 预览也会打开相机、创建 GUI、写 runtime；`--run` 还会启动控制器 | 禁止，除非明确授权 |
-| `python3 run_wide_search.py --run` | 会打开飞控串口，最终可能移动 CH10 和 CH12 | 禁止，除非明确授权 |
-| `make preview` / `make run` | 同上，只是启动器包装 | 禁止，除非明确授权 |
-| `bin/wide_search_control` | 直接打开飞控串口，可能写 CH10/CH12/参数 | 禁止，除非明确授权 |
-| `bin/wide_search_control --dry-run` | 不打开串口，但仍是程序运行并读写 runtime 状态 | 默认不跑；离线联调需明确授权 |
+| python3 run_rescue.py | 预览也会打开相机、创建 GUI、写 runtime；--run 还会启动控制器 | 禁止，除非明确授权 |
+| python3 run_rescue.py --run | 会打开飞控串口，最终可能移动 CH10 | 禁止，除非明确授权 |
+| make preview / make run | 同上，只是启动器包装 | 禁止，除非明确授权 |
+| bin/rescue_control | 直接打开飞控串口，可能写 CH10/参数 | 禁止，除非明确授权 |
+| bin/rescue_control --dry-run | 不打开串口，但仍是程序运行并读写 runtime 状态 | 默认不跑；离线联调需明确授权 |
 | QGC / MAVProxy / mavlink shell | 可能解锁、改模式、发执行机构命令 | 禁止，除非明确授权 |
 | 相机、串口、继电器测试脚本 | 可能占用设备或产生动作 | 禁止，除非明确授权 |
-| 删除/改写 `runtime/route_recovery.txt` | 这是未安全收尾的证据，也是 CH10 功能的恢复快照 | 禁止直接操作，先读操作手册并询问 |
-| 用代码或命令 arm/disarm、改模式、发 RC override | 直接违反本项目“只控制 CH10/CH12”的边界 | 永久禁止 |
-| 手工编辑 `SHA256SUMS.txt` | 会让完整性清单失去意义 | 禁止；只允许 `make checksums` |
+| 删除/改写 runtime/rescue_recovery.txt | 这是未安全收尾的证据，也是 CH10 功能的恢复快照 | 禁止直接操作，先读操作手册并询问 |
+| 忽略 runtime/route_recovery.txt | 旧项目恢复记录也可能代表 CH10 未恢复 | 禁止直接删；人工确认后处理 |
+| 用代码或命令 arm/disarm、改模式、发 RC override | 直接违反本项目安全边界 | 永久禁止 |
+| 手工编辑 SHA256SUMS.txt | 会让完整性清单失去意义 | 禁止；只允许 make checksums |
 
 ## 3. 原因：错误成本不对称
 
-【事实】控制进程只操作 CH10 鱼尾和 CH12 断带灯，但它独占飞控串口并会写 `SERVO10_FUNCTION`。一次误运行可能让鱼尾动作、灯亮起，或把恢复记录留在工作区。
+【事实】控制进程只操作 CH10 鱼尾，但它独占飞控串口并会写 SERVO10_FUNCTION。一次误运行可能让鱼尾动作，或把恢复记录留在工作区。
 
-【事实】视觉预览虽然不下发执行机构命令，但会打开两台相机、创建 OpenCV 窗口并写入 `runtime/`，会干扰现场设备占用和运行数据。
+【事实】视觉预览虽然不下发执行机构命令，但会打开前视相机、创建 OpenCV 窗口并写入 runtime/，会干扰现场设备占用和运行数据。
 
 【设计】因此默认策略不是“先跑一下看看”，而是“先静态检查，任何运行都单独授权”。
 
 ## 4. 安全的替代做法
 
-- 阅读代码和文档（`read` / `grep` / `glob`）。
-- `make test-cpp`：纯逻辑测试，不打开相机、串口或硬件。
+- 阅读代码和文档（read / grep / glob）。
+- make test-cpp：纯逻辑测试，不打开相机、串口或硬件。
 - Python AST/语法检查：不导入 OpenCV，不运行视觉。
-- `python3 .dsh/tools/check_docs.py`：只检查文档链接和结构。
-- `make checksums`：只重算哈希，不碰硬件；源码/二进制变更前先确认范围，文档变更可直接重算。
+- python3 .dsh/tools/check_docs.py：只检查文档链接和结构。
+- make checksums：只重算哈希，不碰硬件；源码/二进制变更前先确认范围，文档变更可直接重算。
 
 ## 5. 如果人类明确授权一次现场运行
 
-即使授权，也按以下顺序执行，不得跳过：
-
 1. 让人类给出明确命令、运行时长、串口/设备路径和现场负责人。
-2. 确认机体固定、周围安全、飞控未解锁；目视确认灯灭、鱼尾无动作。
-3. 检查 `runtime/route_recovery.txt` 不存在；若存在，先按 [操作手册](../../docs/OPERATIONS.md) 处理，不要直接删。
-4. 确认 CH10/CH12 参数与 [硬件接口](../../docs/HARDWARE_IO.md) 一致。
+2. 确认机体固定、周围安全、飞控未解锁；目视确认鱼尾无动作。
+3. 检查 runtime/rescue_recovery.txt 和旧 runtime/route_recovery.txt 都不存在；若存在，先按 [操作手册](../../docs/OPERATIONS.md) 处理，不要直接删。
+4. 确认 CH10 参数与 [硬件接口](../../docs/HARDWARE_IO.md) 一致。
 5. 运行期间只观察，不改代码、不改参数、不并发使用 QGC/MAVProxy。
 6. 出现解锁、心跳超时、视觉失联、ACK 超时、调度超时或任何异常，立即停止并按收尾流程处理。
-7. 运行后检查 `STOP=`、`RESTORE_FUNCTION=`、`LAMP_OFF_CONFIRMED`，确认无残留进程、恢复记录不存在、灯灭、鱼尾中位。
+7. 运行后检查 STOP=、RESTORE_FUNCTION=、确认无残留进程、恢复记录不存在、鱼尾中位。
 
 ## 6. 仍待确认的硬件事实
 
-【待验证】实际 `SERVO10_MIN` / `SERVO10_MAX` 是否会让左弧转弯的低端 PWM 被限幅；启动校验只覆盖了前进段范围。详见 [backlog](../../backlog.md)。
-
-【待验证】目标机上两台相机和飞控的实际 `by-id` 路径是否与源码默认值一致。详见 [backlog](../../backlog.md)。
-
-【待验证】本整理版本未在目标机执行视觉测试、控制器运行或任何硬件联调。详见 [backlog](../../backlog.md)。
+【待验证】0.5 kg 支柱在默认 ±100 us 轻触下是否能撞倒；需要水池/台架实测。
+【待验证】目标机前视相机 by-id、曝光/俯角/触发宽度；需要现场标定。
+【待验证】CH10 SERVO10_MIN/MAX 是否覆盖调参文件 pwm_min/pwm_max；若升到 ±300 需要 1200/1800。
+【待验证】本改造未在目标机执行视觉测试、控制器运行或任何硬件联调。

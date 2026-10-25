@@ -5,5 +5,6 @@
 | 日期 | 日志 | 一句话 |
 | --- | --- | --- |
 | 2026-10-23 | [2026-10-23-bootstrap-agents.md](2026-10-23-bootstrap-agents.md) | 建立 AGENTS.md 索引、.dsh 主题文档、backlog 和安全红线。 |
+| 2026-10-25 | [2026-10-25-rescue-mode.md](2026-10-25-rescue-mode.md) | 改造为水中救援专用：前视黑筒检测、GUI 调参、CH10 轻撞；删除旧巡线实现。 |
 
 新增日志时，文件名使用 `YYYY-MM-DD-<slug>.md`，并在上表追加一行。
